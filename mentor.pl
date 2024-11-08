@@ -5,167 +5,110 @@
 :- use_module(library(pure_input)).  % For enhanced input handling
 :- use_module(library(lists)).  % For list processing
 
-% Define the CORS headers
+% CORS headers for cross-origin requests
 add_cors_headers :-
     format('Access-Control-Allow-Origin: *~n'),
     format('Access-Control-Allow-Methods: POST, OPTIONS~n'),
     format('Access-Control-Allow-Headers: Content-Type~n').
 
-% Main entry point for the server
+% Start the server
 start_server(Port) :-
     http_server(http_dispatch, [port(Port)]).
 
-% Handle CORS preflight requests (OPTIONS request)
+% Handle CORS preflight requests
 :- http_handler(root(chat), handle_options, [method(options)]).
 
 handle_options(_Request) :-
     add_cors_headers,
     format('~n', []).
 
-% Consolidate handle_chat/1 predicates
-:- discontiguous handle_chat/1.
-
-% Handle POST requests for /chat
+% Main chat handler
 :- http_handler(root(chat), handle_chat, [method(post)]).
 
 handle_chat(Request) :-
     add_cors_headers,
-    http_read_json_dict(Request, JSONIn),  % Use http_read_json_dict to parse as dict
+    http_read_json_dict(Request, JSONIn),
     (   get_dict(query, JSONIn, Query)
-    ->  (   Query == "list prompts"
-        ->  list_prompts(Prompts),
-            reply_json_dict(_{response: Prompts})
-        ;   Query == "all advice"
-        ->  all_financial_advice(AllAdvice),
-            reply_json_dict(_{response: AllAdvice})
-        ;   financial_advice(Query, Response),
-            reply_json_dict(_{response: Response})
-        )
-    ;   get_dict(query, JSONIn, UserInput)
-    ->  process_user_input(UserInput, Response),
+    ->  process_user_input(Query, Response),
         reply_json_dict(_{response: Response})
     ;   reply_json_dict(_{error: "Missing or invalid query parameter."})
     ).
 
-% Prompt listing
-list_prompts(Prompts) :-
-    findall(Prompt, available_prompt(Prompt), AllPrompts),
-    numbered_list(AllPrompts, 1, Prompts).
+% Track the last topic for expounding
+:- dynamic last_topic/1.
 
-% Basic Keyword Extraction
+% Process user input
 process_user_input(UserInput, Response) :-
+    % Extract keywords
     extract_keywords(UserInput, Keywords),
-    generate_response(Keywords, Response).
-
-% Extract key terms (e.g., 'save', 'retirement', 'investment') from the input text
-extract_keywords(UserInput, Keywords) :-
-    % Normalize the input (convert to lowercase, remove punctuation, etc.)
-    normalize_text(UserInput, NormalizedInput),
-    % Use basic keyword matching
-    findall(Keyword, keyword_match(NormalizedInput, Keyword), Keywords).
-
-% Normalize input text (e.g., lowercase, removing punctuation)
-normalize_text(Text, NormalizedText) :-
-    downcase_atom(Text, LowerCaseText),
-    atom_chars(LowerCaseText, Chars),
-    exclude(is_punctuation, Chars, CleanChars), % Remove punctuation
-    exclude(is_stopword, CleanChars, FilteredChars), % Remove stopwords like 'mama'
-    atom_chars(NormalizedText, FilteredChars).
-
-% Stopwords removal (like 'mama', 'how', etc.)
-is_stopword(Char) :-
-    member(Char, ['mama', 'please', 'help', 'how']), % Define more stopwords as needed
-    !.
-is_stopword(_) :- false.
-
-% Check for a match with known keywords
-keyword_match(Text, Keyword) :-
-    member(Keyword, ["investment", "invest", "investing", "savings", "budgeting", "retirement", "debt", "stocks", "bonds"]),
-    sub_atom(Text, _, _, _, Keyword).
-
-% Generate response based on extracted keywords
-generate_response(Keywords, Response) :-
-    (   member("investment", Keywords)
-    ->  Response = "Diversifying your investments across stocks, bonds, and mutual funds is key."
-    ;   member("invest", Keywords)
-    ->  Response = "Investing wisely can help you grow your wealth. Consider stocks, bonds, or mutual funds."
-    ;   member("investing", Keywords)
-    ->  Response = "Investing is crucial for long-term wealth accumulation. Think about diverse assets."
-    ;   member("savings", Keywords)
-    ->  Response = "Consider setting up an emergency fund and exploring high-interest savings accounts."
-    ;   member("budgeting", Keywords)
-    ->  Response = "Using budgeting tools like Mint or YNAB can help you track expenses."
-    ;   member("retirement", Keywords)
-    ->  Response = "Start contributing to retirement accounts like a 401k or IRA."
-    ;   member("debt", Keywords)
-    ->  Response = "Consider consolidating debt or negotiating lower interest rates."
-    ;   Response = "I don't understand that. Could you clarify your question?"
+    (   member("expound", Keywords)
+    ->  (   last_topic(Topic),
+            expanded_response(Topic, ExpandedResponse)
+        ->  Response = ExpandedResponse
+        ;   Response = "I don't have more details on that."
+        )
+    ;   generate_response(Keywords, BasicResponse),
+        asserta(last_topic(BasicResponse)),  % Save last topic for potential "expound" request
+        Response = BasicResponse
     ).
 
-% Available prompts
-available_prompt("investment").
-available_prompt("invest").
-available_prompt("investing").
-available_prompt("investment risk").
-available_prompt("investment returns").
-available_prompt("types of investments").
-available_prompt("investment diversification").
-available_prompt("savings").
-available_prompt("investment").
-available_prompt("emergency fund").
-available_prompt("best savings accounts").
-available_prompt("debt").
-available_prompt("debt repayment").
-available_prompt("debt consolidation").
-available_prompt("budgeting").
-available_prompt("budgeting tools").
-available_prompt("retirement").
-available_prompt("catching up retirement").
-available_prompt("all advice").
-available_prompt("list prompts").
+% Related terms for flexible matching
+related_term("investment", ["invest", "investing", "investment"]).
+related_term("savings", ["saving", "savings", "save", "emergency fund"]).
+related_term("budgeting", ["budget", "budgeting", "expenses", "spending"]).
+related_term("retirement", ["retire", "retirement", "pension", "401k", "IRA"]).
+related_term("debt", ["debt", "loans", "borrow", "borrowing", "repayment"]).
 
-% Create a numbered list from the prompts
-numbered_list([], _, []).
-numbered_list([H|T], N, [N-H|NumberedTail]) :-
-    N1 is N + 1,
-    numbered_list(T, N1, NumberedTail).
+% Basic responses for each topic
+generate_response(Keywords, Response) :-
+    (   member(Keyword, Keywords),
+        related_term("investment", RelatedTerms),
+        member(Keyword, RelatedTerms)
+    ->  Response = "Consider diversifying your investments across stocks, bonds, and mutual funds."
+    ;   member(Keyword, Keywords),
+        related_term("savings", RelatedTerms),
+        member(Keyword, RelatedTerms)
+    ->  Response = "Set up an emergency fund and explore high-interest savings accounts."
+    ;   member(Keyword, Keywords),
+        related_term("budgeting", RelatedTerms),
+        member(Keyword, RelatedTerms)
+    ->  Response = "Using budgeting tools like Mint or YNAB can help you track expenses."
+    ;   member(Keyword, Keywords),
+        related_term("retirement", RelatedTerms),
+        member(Keyword, RelatedTerms)
+    ->  Response = "Start contributing to retirement accounts like a 401k or IRA."
+    ;   member(Keyword, Keywords),
+        related_term("debt", RelatedTerms),
+        member(Keyword, RelatedTerms)
+    ->  Response = "Avoiding bad debt can involve focusing on lower-interest loans and repaying high-interest debt first."
+    ;   Response = "I don't have advice on that. Could you clarify your question?"
+    ).
 
-% Financial advice predicates (consolidated)
-:- discontiguous financial_advice/2.
+% Expanded responses for detailed explanations
+expanded_response("investment", "Investing wisely involves spreading your funds across various assets. Stocks offer growth potential but come with higher risk, while bonds offer stability. Consider mutual funds for diversification.").
+expanded_response("savings", "Building savings involves setting aside money regularly. Start with an emergency fund covering 3-6 months of expenses, then explore high-interest accounts or certificates of deposit (CDs) for better returns.").
+expanded_response("budgeting", "Effective budgeting means tracking income and expenses each month. Use tools like Mint or YNAB to categorize spending, identify savings opportunities, and set realistic financial goals.").
+expanded_response("retirement", "Retirement planning involves contributing to accounts like 401(k)s or IRAs early. The power of compounding interest helps your funds grow over time, making it easier to meet retirement goals.").
+expanded_response("debt", "Managing debt means paying down high-interest loans first to save on interest. Debt consolidation may also help reduce rates and simplify payments, making repayment manageable.").
 
-% General Investment Advice
-financial_advice("investment", "Consider diversifying into stocks, bonds, and mutual funds.").
-financial_advice("investment", Advice) :- 
-    Advice = "Diversify your investments in different sectors for better risk management.".
+% Extract key terms from input text
+extract_keywords(UserInput, Keywords) :-
+    downcase_atom(UserInput, LowerCaseText),
+    split_string(LowerCaseText, " ", "", KeywordList),
+    filter_keywords(KeywordList, Keywords).
 
-financial_advice("investment risk", "High-risk investments include stocks, while low-risk options include bonds.").
-financial_advice("investment risk", Advice) :-
-    Advice = "To balance risk, consider spreading investments across both high-risk (e.g., stocks) and low-risk (e.g., bonds) assets.".
+% Filter out stopwords
+filter_keywords([], []).
+filter_keywords([H|T], Keywords) :-
+    (   is_stopword(H)
+    ->  filter_keywords(T, Keywords)
+    ;   Keywords = [H|RestKeywords],
+        filter_keywords(T, RestKeywords)
+    ).
 
-financial_advice("investment returns", "Historical returns suggest a diversified portfolio often outperforms individual investments.").
-financial_advice("investment returns", Advice) :-
-    Advice = "Over the long term, diversified investments tend to have more stable returns compared to concentrated investments.".
-
-% Other financial advice clauses
-financial_advice("savings", "Consider setting up an emergency fund and exploring high-interest savings accounts.").
-financial_advice("savings", "Aim to save at least 3-6 months of expenses in case of emergencies.").
-
-financial_advice("budgeting", "Using budgeting tools like Mint or YNAB can help you track expenses.").
-financial_advice("budgeting", "Create a monthly budget by tracking income and expenses.").
-
-financial_advice("retirement", "Start contributing to retirement accounts like a 401k or IRA.").
-financial_advice("retirement", "Make sure to diversify your retirement savings across different assets.").
-
-financial_advice("debt", "Consider consolidating debt or negotiating lower interest rates.").
-financial_advice("debt", "Paying off high-interest debt first can help you save money in the long run.").
-
-% Collect all financial advice for the "all advice" request
-all_financial_advice(AllAdvice) :-
-    findall(AdvicePair, financial_advice(_, AdvicePair), AllAdviceList),
-    list_to_set(AllAdviceList, AllAdvice). % Remove duplicates if any
-
-% Default Catch-All Response
-financial_advice(_, "I don't have advice on that. Could you clarify your query?").
+% Define basic stopwords to ignore
+is_stopword(Word) :-
+    member(Word, ["the", "is", "of", "a", "an", "and", "for", "in", "to", "how", "i", "do", "can", "please"]).
 
 % Start the server on port 8000
 :- initialization(start_server(8000)).
