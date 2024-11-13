@@ -11,8 +11,10 @@ add_cors_headers :-
     format('Access-Control-Allow-Methods: POST, OPTIONS~n'),
     format('Access-Control-Allow-Headers: Content-Type~n').
 
-% Start the server
-start_server(Port) :-
+% Start the server on a dynamic port
+start_server :-
+    getenv('PORT', PortStr),
+    atom_number(PortStr, Port),
     http_server(http_dispatch, [port(Port)]).
 
 % Handle CORS preflight requests
@@ -110,5 +112,5 @@ filter_keywords([H|T], Keywords) :-
 is_stopword(Word) :-
     member(Word, ["the", "is", "of", "a", "an", "and", "for", "in", "to", "how", "i", "do", "can", "please"]).
 
-% Start the server on port 8000
-:- initialization(start_server(8000)).
+% Start the server on a dynamic port based on environment variable
+:- initialization(start_server).
