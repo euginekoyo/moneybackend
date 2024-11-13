@@ -7,8 +7,8 @@ WORKDIR /mentor
 # Copy the Prolog files into the container
 COPY . .
 
-# Expose the port your server is running on (e.g., 8000)
+# Expose the port your server is running on
 EXPOSE 8000
 
-# Start the Prolog server
-CMD ["swipl", "-g", "start_server(8000)", "-t", "halt"]
+# Start the Prolog server and ensure it loads app.pl
+CMD ["swipl", "-s", "mentor.pl", "-g", "start_server(8000)", "-t", "halt"]
